@@ -173,28 +173,54 @@ fieldset {
     localStorage.setItem('midoutput', currentOutput = midoutput.value)
   })
 
-  let deltas = {}
+  const deltas = [0, 0, 0]
+  const strums = [new Set, new Set, new Set] // low to high, sets contain octaves
+
+  // channel  3 (2): Chord Plus
+  // channel  5 (4): Auto Chord 1
+  // channel  6 (5): Auto Chord 2
+  // channel  7 (6): Auto Chord 3
+  // channel  8 (7): Auto Chord 4
+  // channel  9 (8): Bass
+  // channel 10 (9): Drums
 
   function onMIDIMessage({ data }) {
     let message = data[0] >> 4
     let channel = data[0] & 15 // 0-15
 
+    if (channel > 4 && channel < 13) return
+
+    console.log(channel, message, data[1], data[2])
+
     // pitch bend handling
     if (message == 14) {
       let delta       = (data[2] << 7 | data[1]) - 8192
       let semitones   = delta * 12 / 8192
-      deltas[channel] = semitones
-      console.log(`Pitch offset (semitones): ${semitones}`)
+      deltas[channel - 13] = semitones
     }
 
     // plain forwarding of NoteOn midi messages
     if (message == 9 && (channel == 14 || channel == 13 || channel == 15)) {
+
+      let octave = floor((data[1] - 60) / 12)
+
+      if (data[2] == 0) { // zero velocity (== note off)
+        strums[channel - 13].delete(octave)
+        // we eventually convert the message into a proper NoteOff
+        if (noteoff.checked) message = 8
+      }
+      else {
+        strums[channel - 13].add(octave)
+      }
+
       // overwrite channel
       data[0] = message << 4 | parseInt(outputchn.value)
       // apply pitch bend delta to note on
-      data[1] = Math.round(data[1] + (deltas[channel] || 0))
+      data[1] = round(data[1] + deltas[channel - 13])
       // and send it away
       midi.outputs.get(currentOutput).send(data)
+
+      drawQChord()
     }
   }
 
@@ -254,6 +280,8 @@ fieldset {
 
     for (let note = 0; note < 13; note++) {
       let octave = floor(note / 3)
+      let chord  = note % 3
+      ctx.fillStyle = strums[chord].has(octave) ? '#000' : '#bbb'
       ctx.fillRect(0, note * noteheight + octave * 2, strumwidth - 10, noteheight - 1)
     }
 
