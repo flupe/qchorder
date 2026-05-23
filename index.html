@@ -1,39 +1,127 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <title>qchorder</title>
 <style>
 body {
   font-family: monospace;
+  font-size: 14px;
+  hyphens: auto;
 }
 
 main {
-  width: 640px;
+  max-width: 740px;
   margin: 0 auto;
 }
 
+form {
+  margin: 2rem 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem 2ch;
+}
+
 fieldset {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  align-content: start;
   outline: none;
   border: none;
   padding: 0;
-}
+  margin: 0;
+  gap: 1em 1ch;
 
+  label { grid-column: 1; }
+  select {
+    grid-column: 2;
+    padding: .3rem;
+  }
+
+  p, legend span { grid-column: 1 / -1; }
+
+  p {
+    margin: 0;
+    opacity: .6;
+    padding: 0 0 0 1ch;
+  }
+
+  legend {
+    display: contents;
+
+    span {
+      display: block;
+      border-bottom: 1px solid #000;
+      text-transform: uppercase;
+      opacity: .6;
+      padding: 0 0 .5em 1ch;
+    }
+  }
+
+  &.wide { grid-column: 1 / -1 }
+}
 </style>
   </head>
   <body>
     <main>
       <h1>qchorder</h1>
-      <p>The Suzuki Q-Chord provides a basic but rather inconvenient MIDI Out interface.
+      <p>The <a href="https://qchord.net/" title="Suzuki Q-Chord">Suzuki Q-Chord</a> provides a basic
+         but rather inconvenient MIDI Out interface.
          This web utility converts the outgoing signal from the Q-Chord
          into more standard MIDI messages that can be forwarded further into DAWs.</p>
-      <fieldset>
-        <label for="midinput">Input:</label>
-        <select id="midinput"></select>
-        <label for="midoutput">Output:</label>
-        <select id="midoutput"></select>
-        <
-      </fieldset>
-      <p>MIDI Device not showing up? Reload the page once the device has been plugged in.</p>
+      <form>
+        <fieldset>
+          <legend><span>Input</span></legend>
+          <p>This is where the MIDI device corresponding to your Suzuki Q-Chord should be selected.
+             The web utility will process all messages coming from this device.
+          </p>
+          <label for="midinput">Device:</label>
+          <select id="midinput"></select>
+        </fieldset>
+        <fieldset>
+          <legend><span>Output</span></legend>
+          <p>The "corrected" MIDI signal will be forwarded to this MIDI device, on the selected channel.</p>
+          <label for="midoutput">Device:</label>
+          <select id="midoutput"></select>
+          <label for="outputchn">Channel:</label>
+          <select id="outputchn">
+            <option value="0">1</option>
+            <option value="1">2</option>
+            <option value="2">3</option>
+            <option value="3">4</option>
+            <option value="4">5</option>
+            <option value="5">6</option>
+            <option value="6">7</option>
+            <option value="7">8</option>
+            <option value="8">9</option>
+            <option value="9">10</option>
+            <option value="10">11</option>
+            <option value="11">12</option>
+            <option value="12">13</option>
+            <option value="13">14</option>
+            <option value="14">15</option>
+            <option value="15">16</option>
+          </select>
+        </fieldset>
+        <fieldset class="wide">
+          <legend><span>Settings</span></legend>
+          <p>Here you can finetune how the Q-Chord MIDI messages are processed. Well, you will soon be able to.</p>
+        </fieldset>
+      </form>
+      <p>So what is this about? The Suzuki Q-Chord MIDI mapping is somewhat convoluted.
+         As you may know, the strumplate is divided into 4-ish sections for each octave.
+         On each of those sections, the three notes of a selected chord can be played individually.
+         Rather than generating a single "Note On" MIDI message for every note that is played on the strumplate,
+         the Q-Chord separates this information over 3 distinct MIDI channels. The bottom notes of a chord,
+         for any octave, are played on channel 14. The middle notes on channel 15, and the high notes on channel 16.
+         Additionally, such "Note On" messages do not contain the actual note that is being played,
+         but always the C of the current octave.
+         Instead, a "Pitch Bend" message is sent on the three channels every time a new chord
+         is selected on the Q-Chord.
+      </p>
+      <p>This tool does the trivial translation of merging those 3 channels into one, and processing the 
+      pitch bend information so that "Note On" messages contain the actual note that is being played.
+      </p>
     </main>
 <script type="module">
   const on = (t, e, f)  => t.addEventListener(e, f)
@@ -78,30 +166,11 @@ fieldset {
     localStorage.setItem('midoutput', currentOutput = midoutput.value)
   })
 
-  // message mames
-  let messages = {
-    8:  "Note Off",
-    9:  "Note On",
-    10: "Aftertouch",
-    11: "CC",
-    12: "Program Change",
-    13: "Channel Pressure",
-    14: "Pitch Bend",
-  }
-
-  let prettyMsg = msg => msg in messages ? messages[msg] : msg
-
-  // 13 - lower chord note
-  // 14 - mid   chord note
-  // 15 - high  chord note
-
   let deltas = {}
 
   function onMIDIMessage({ data }) {
     let message = data[0] >> 4
     let channel = data[0] & 15 // 0-15
-
-    console.log(channel, prettyMsg(message))
 
     // pitch bend handling
     if (message == 14) {
@@ -113,9 +182,11 @@ fieldset {
 
     // plain forwarding of note on midi data
     if (message == 9 && (channel == 14 || channel == 13 || channel == 15)) {
+      // apply pitch bend delta to note on
       let note = Math.round(data[1] + (deltas[channel] || 0))
-      data[0] = message << 4
+      data[0] = message << 4 | parseInt(outputchn.value)
       data[1] = note
+
       midi.outputs.get(currentOutput).send(data)
     }
   }
