@@ -10,7 +10,14 @@ body {
 }
 
 main {
-  max-width: 740px;
+  max-width: 780px;
+  margin: 0 auto;
+}
+
+canvas {
+  display: block;
+  width: 50%;
+  aspect-ratio: 3/2;
   margin: 0 auto;
 }
 
@@ -22,40 +29,29 @@ form {
 }
 
 fieldset {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
-  align-content: start;
   outline: none;
   border: none;
   padding: 0;
   margin: 0;
   gap: 1em 1ch;
 
-  label { grid-column: 1; }
-  select {
-    grid-column: 2;
-    padding: .3rem;
-  }
-
-  p, legend span { grid-column: 1 / -1; }
+  label  { cursor: pointer }
+  select { padding: .3rem; }
+  input  { margin: 0 }
 
   p {
-    margin: 0;
-    opacity: .6;
-    padding: 0 0 0 1ch;
+    margin: 0 0 .5rem;
+    opacity: .7;
+    font-style: italic;
   }
 
   legend {
-    display: contents;
-
-    span {
-      display: block;
-      border-bottom: 1px solid #000;
-      text-transform: uppercase;
-      opacity: .6;
-      padding: 0 0 .5em 1ch;
-    }
+    display: block;
+    width: 100%;
+    text-transform: uppercase;
+    border-bottom: 1px dashed #000;
+    padding: 0 0 .5rem;
+    margin: 0 0 .5rem;
   }
 
   &.wide { grid-column: 1 / -1 }
@@ -69,9 +65,10 @@ fieldset {
          but rather inconvenient MIDI Out interface.
          This web utility converts the outgoing signal from the Q-Chord
          into more standard MIDI messages that can be forwarded further into DAWs.</p>
+      <canvas id="cvs"></canvas>
       <form>
         <fieldset>
-          <legend><span>Input</span></legend>
+          <legend>Input</legend>
           <p>This is where the MIDI device corresponding to your Suzuki Q-Chord should be selected.
              The web utility will process all messages coming from this device.
           </p>
@@ -79,7 +76,7 @@ fieldset {
           <select id="midinput"></select>
         </fieldset>
         <fieldset>
-          <legend><span>Output</span></legend>
+          <legend>Output</legend>
           <p>The "corrected" MIDI signal will be forwarded to this MIDI device, on the selected channel.</p>
           <label for="midoutput">Device:</label>
           <select id="midoutput"></select>
@@ -104,8 +101,10 @@ fieldset {
           </select>
         </fieldset>
         <fieldset class="wide">
-          <legend><span>Settings</span></legend>
-          <p>Here you can finetune how the Q-Chord MIDI messages are processed. Well, you will soon be able to.</p>
+          <legend>Settings</legend>
+          <p>Here you can finetune how the Q-Chord MIDI messages are processed.</p>
+          <input type="checkbox" checked id="noteoff"></input>
+          <label for="noteoff">Convert velocity 0 Note On messages into Note Off</label>
         </fieldset>
       </form>
       <p>So what is this about? The Suzuki Q-Chord MIDI mapping is somewhat convoluted.
@@ -124,28 +123,30 @@ fieldset {
       </p>
     </main>
 <script type="module">
-  const on = (t, e, f)  => t.addEventListener(e, f)
-  const off = (t, e, f) => t.removeEventListener(e, f)
+  const on   = (t, e, f)  => t.addEventListener(e, f)
+  const off  = (t, e, f) => t.removeEventListener(e, f)
   const midi = await navigator.requestMIDIAccess()
+  const ctx  = cvs.getContext("2d")
+
+  // shorthand for select option creation
+  const $opt  = (v, t) => {
+    const o = document.createElement("option")
+    o.value = v
+    o.innerText = t
+    return o
+  }
 
   // current midi input/output ID
   let currentInput
   let currentOutput
 
-  // populate midi inputs
-  midi.inputs.forEach(input => {
-    const option = document.createElement("option")
-    option.value     = input.id
-    option.innerText = input.name
-    midinput.appendChild(option)
-  })
+  // populate midi inputs/outputs
+  midi.inputs.forEach(({ id,  name }) => midinput.appendChild($opt(id, name)))
+  midi.outputs.forEach(({ id, name }) => midoutput.appendChild($opt(id, name)))
 
-  // populate midi outputs
-  midi.outputs.forEach(output => {
-    const option = document.createElement("option")
-    option.value     = output.id
-    option.innerText = output.name
-    midoutput.appendChild(option)
+  // TODO: update inputs/outputs on state change
+  on(midi, 'statechange', ({ port }) => {
+    console.log(port.name, port.manufacturer, port.type, port.state)
   })
 
   // input selection handling
@@ -174,22 +175,73 @@ fieldset {
 
     // pitch bend handling
     if (message == 14) {
-      let delta = (data[2] << 7 | data[1]) - 8192
-      let semitones = delta * 12 / 8192
+      let delta       = (data[2] << 7 | data[1]) - 8192
+      let semitones   = delta * 12 / 8192
       deltas[channel] = semitones
       console.log(`Pitch offset (semitones): ${semitones}`)
     }
 
-    // plain forwarding of note on midi data
+    // plain forwarding of NoteOn midi messages
     if (message == 9 && (channel == 14 || channel == 13 || channel == 15)) {
-      // apply pitch bend delta to note on
-      let note = Math.round(data[1] + (deltas[channel] || 0))
+      // overwrite channel
       data[0] = message << 4 | parseInt(outputchn.value)
-      data[1] = note
-
+      // apply pitch bend delta to note on
+      data[1] = Math.round(data[1] + (deltas[channel] || 0))
+      // and send it away
       midi.outputs.get(currentOutput).send(data)
     }
   }
+
+  on(window, 'resize', drawQChord)
+
+  cvs.style.width  = `${cvs.clientWidth}px`
+  cvs.style.height = `${cvs.clientHeight}px`
+
+  function drawQChord() {
+    const width  = cvs.clientWidth
+    const height = cvs.clientHeight
+
+    cvs.width  = devicePixelRatio * cvs.clientWidth
+    cvs.height = devicePixelRatio * cvs.clientHeight
+
+    ctx.save()
+    ctx.scale(devicePixelRatio, -devicePixelRatio)
+    ctx.translate(width >> 1, -height >> 1)
+
+    // strumplate -------------
+    ctx.save()
+    ctx.translate(0, - height >> 2)
+    ctx.transform(1, 0, .5, 1, 0, 0) // skew transform
+    ctx.fillStyle = ctx.strokeStyle = '#bbb'
+    ctx.lineWidth = 2
+
+    // outline
+    ctx.beginPath()
+    ctx.roundRect(0, 0, 50, height / 2, [15, 0, 15, 0])
+    ctx.stroke()
+
+    ctx.save()
+    ctx.beginPath()
+    ctx.roundRect(5, 5, 40, height / 2 - 10, [10, 0, 10, 0])
+    ctx.clip()
+
+    ctx.translate(5, 5)
+
+    for (let octave = 0; octave < 4; octave++) {
+      let octaveheight = (height / 2 - 10 - 3 * 2) / 4
+      ctx.fillRect(0, 0, 40, octaveheight)
+      ctx.translate(0, octaveheight + 2)
+    }
+
+    ctx.restore()
+    ctx.restore()
+
+    // -------------
+
+    ctx.restore()
+  }
+
+  drawQChord()
 </script>
   </body>
 </html>
