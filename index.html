@@ -16,8 +16,9 @@ main {
 
 canvas {
   display: block;
-  width: 50%;
-  aspect-ratio: 3/2;
+  max-width: 600px;
+  width: 100%;
+  aspect-ratio: 2/1;
   margin: 0 auto;
 }
 
@@ -123,25 +124,32 @@ fieldset {
       </p>
     </main>
 <script type="module">
-  const on   = (t, e, f)  => t.addEventListener(e, f)
+  const {floor, round} = Math
+  const on   = (t, e, f) => t.addEventListener(e, f)
   const off  = (t, e, f) => t.removeEventListener(e, f)
   const midi = await navigator.requestMIDIAccess()
   const ctx  = cvs.getContext("2d")
 
   // shorthand for select option creation
-  const $opt  = (v, t) => {
+  function $opt(v, t) {
     const o = document.createElement("option")
     o.value = v
     o.innerText = t
     return o
   }
 
-  // current midi input/output ID
-  let currentInput
-  let currentOutput
+  // retrieve selected device from localstorage, if still available
+  function savedDevice(name, input) {
+    let local = localStorage.getItem(name)
+    if (local && [...input.options].some(opt => opt.value == local)) {
+      input.value = local
+      return local
+    }
+    else return input.value
+  }
 
   // populate midi inputs/outputs
-  midi.inputs.forEach(({ id,  name }) => midinput.appendChild($opt(id, name)))
+  midi.inputs.forEach(({ id, name }) => midinput.appendChild($opt(id, name)))
   midi.outputs.forEach(({ id, name }) => midoutput.appendChild($opt(id, name)))
 
   // TODO: update inputs/outputs on state change
@@ -149,11 +157,9 @@ fieldset {
     console.log(port.name, port.manufacturer, port.type, port.state)
   })
 
-  // input selection handling
-  currentInput    = localStorage.getItem('midinput')  || midinput.value
-  currentOutput   = localStorage.getItem('midoutput') || midoutput.value
-  midinput.value  = currentInput
-  midoutput.value = currentOutput
+  // current midi input/output ID
+  let currentInput  = savedDevice('midinput', midinput)
+  let currentOutput = savedDevice('midoutput', midoutput)
 
   on(midi.inputs.get(currentInput), 'midimessage', onMIDIMessage)
 
@@ -194,43 +200,61 @@ fieldset {
 
   on(window, 'resize', drawQChord)
 
-  cvs.style.width  = `${cvs.clientWidth}px`
-  cvs.style.height = `${cvs.clientHeight}px`
+  // canvas ratio is always 1/2, we pick our own size and adjust density
+  const width  = 400
+  const height = 200
 
   function drawQChord() {
-    const width  = cvs.clientWidth
-    const height = cvs.clientHeight
-
-    cvs.width  = devicePixelRatio * cvs.clientWidth
-    cvs.height = devicePixelRatio * cvs.clientHeight
+    // proper smoothing
+    cvs.width   = devicePixelRatio * cvs.clientWidth
+    cvs.height  = devicePixelRatio * cvs.clientHeight
+    const ratio = devicePixelRatio * cvs.clientWidth / width
 
     ctx.save()
-    ctx.scale(devicePixelRatio, -devicePixelRatio)
-    ctx.translate(width >> 1, -height >> 1)
+    ctx.scale(ratio, -ratio)
+    ctx.translate(0, -height)
 
-    // strumplate -------------
-    ctx.save()
-    ctx.translate(0, - height >> 2)
-    ctx.transform(1, 0, .5, 1, 0, 0) // skew transform
     ctx.fillStyle = ctx.strokeStyle = '#bbb'
     ctx.lineWidth = 2
 
-    // outline
+    // qchord outline ---------
     ctx.beginPath()
-    ctx.roundRect(0, 0, 50, height / 2, [15, 0, 15, 0])
+    ctx.moveTo(5, 5)
+    ctx.lineTo(290, 5)
+    ctx.bezierCurveTo(310, 5, 395, 20, 395, 100)
+    ctx.bezierCurveTo(395, 180, 330, 195, 290, 195)
+    ctx.lineTo(100, 100)
+    ctx.lineTo(130, 100)
+    ctx.lineTo(130,  70)
+    ctx.lineTo(5,  70)
+    ctx.closePath()
     ctx.stroke()
 
+    // strumplate -------------
+    const strumheight = 100
+    const strumwidth  = 45
+
+    ctx.save()
+    ctx.translate(230, 40)
+    ctx.transform(1, 0, .7, 1, 0, 0) // skew transform
+
+    // outline
+    ctx.beginPath()
+    ctx.roundRect(0, 0, strumwidth, strumheight, [15, 0, 15, 0])
+    ctx.stroke()
+
+    // strumplate clip region
     ctx.save()
     ctx.beginPath()
-    ctx.roundRect(5, 5, 40, height / 2 - 10, [10, 0, 10, 0])
+    ctx.roundRect(5, 5, strumwidth - 10, strumheight - 10, [10, 0, 10, 0])
     ctx.clip()
-
     ctx.translate(5, 5)
 
-    for (let octave = 0; octave < 4; octave++) {
-      let octaveheight = (height / 2 - 10 - 3 * 2) / 4
-      ctx.fillRect(0, 0, 40, octaveheight)
-      ctx.translate(0, octaveheight + 2)
+    let noteheight = (strumheight - 10 - 4 * 2 + 1) / 13
+
+    for (let note = 0; note < 13; note++) {
+      let octave = floor(note / 3)
+      ctx.fillRect(0, note * noteheight + octave * 2, strumwidth - 10, noteheight - 1)
     }
 
     ctx.restore()
